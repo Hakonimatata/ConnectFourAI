@@ -71,13 +71,6 @@ optimizer = optim.Adam(policy_net.parameters(), lr=1e-4)
 criterion = nn.SmoothL1Loss()
 memory = ReplayMemory(10000)
 
-# --- Training Loop ---
-def select_action(state, steps_done):
-    epsilon = max(0.1, 0.9 - steps_done / 1000)  # Linearly decrease epsilon
-    if random.random() < epsilon:
-        return torch.tensor([env.sample_action()], device=device)
-    with torch.no_grad():
-        return policy_net(state).argmax(dim=1).unsqueeze(0)
 
 # optimize_model
 def optimize_model():
@@ -135,6 +128,7 @@ def load_checkpoint(model, optimizer, filename='checkpoint.pth'):
 # --- Main training loop. Run thus for training ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 env = ConnectFour3DEnv()
+env.is_training = True
 
 policy_net = DQN(env.num_observations, env.num_actions).to(device)
 target_net = DQN(env.num_observations, env.num_actions).to(device)

@@ -50,12 +50,24 @@ def play_game():
 
         # Modellens trekk
         action = model_move(state)  # Modellens trekk (som en indeks)
-        print(f"AI's move (as index): {action}")
-        x, y = env.action_space[action]  # Konverter action til koordinater (x, y)
-        print(f"AI's move (as coordinates): ({x}, {y})")
 
-        # Utfør modellens trekk
-        state, reward, done = env.step((x, y))
+        while True:
+            action = model_move(state)  # Modellens trekk (som en indeks)
+            if env.is_valid_action(env.action_space[action]):
+
+                print(f"AI's move (as index): {action}")
+                x, y = env.action_space[action]  # Konverter action til koordinater (x, y)
+                print(f"AI's move (as coordinates): ({x}, {y})")
+
+                # Utfør modellens trekk
+                state, reward, done = env.step((x, y))
+                break
+
+        
+
+        if done and reward < 0:
+            print("AI did an invalid move!")
+            break
 
         if done:
             print("Player 1 wins!" if env.current_player == 1 else "Player 2 wins!")

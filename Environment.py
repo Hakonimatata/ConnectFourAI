@@ -4,8 +4,6 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 
-TRAINING = False
-
 class ConnectFour3DEnv: # Game environment class
     def __init__(self):
         # init empty grid
@@ -14,23 +12,14 @@ class ConnectFour3DEnv: # Game environment class
         self.last_placed_brick = None
         self.num_actions = 4 * 4
         self.num_observations = 4 * 4 * 4
+        self.is_training = False
         # Create the action space of all possible combinations of actions
         self.action_space = [(x, y) for x in range(4) for y in range(4)]
         self.directions = [ # 13 directions in total
-            (1, 0, 0),  
-            (0, 1, 0),  
-            (0, 0, 1),  
-
-            (1, 1, 0),  
-            (1, 0, 1),  
-            (0, 1, 1), 
-            (1, -1, 0), 
-            (1, 0, -1),
-            (0, 1, -1), 
-            
-            (1, 1, 1),  
-            (1, -1, -1),
-            (-1, 1, -1),
+            (1, 0, 0), (0, 1, 0), (0, 0, 1),  
+            (1, 1, 0), (1, 0, 1), (0, 1, 1), 
+            (1, -1, 0), (1, 0, -1), (0, 1, -1), 
+            (1, 1, 1), (1, -1, -1), (-1, 1, -1),
             (-1, -1, 1),
         ]
         
@@ -127,12 +116,9 @@ class ConnectFour3DEnv: # Game environment class
     def step(self, action):
         """Performs a step in the environment. Players are switched."""
 
-        # print(f"Before action by player {self.current_player}:\n{self.grid}")
-        # print(f"Action: {action}")
-
         if not self.is_valid_action(action):
             # invalid action. Penalize the AI and return
-            reward = -1
+            reward = -20
             done = True
             return self.grid, reward, done
         
@@ -141,7 +127,8 @@ class ConnectFour3DEnv: # Game environment class
 
         # Check for win or draw
         if self.check_win():
-            print(f"Player {self.current_player} wins!")
+            if not self.is_training:
+                print(f"Player {self.current_player} wins!")
             reward += 10  # Win for current player
             done = True
         elif np.all(self.grid != 0): # check if the grid is full without a win
@@ -152,15 +139,13 @@ class ConnectFour3DEnv: # Game environment class
             done = False
 
         if done and reward != 1:
-        # If the current player loses (reward is 0), give -1 for the opponent (the player who did not win)
+            # If the current player loses (reward is 0), give negative reward for the opponent (the player who did not win)
             reward = -10
-
-        # print(f"After action by player {self.current_player}:\n{self.grid}")
 
         # Switch player if not done
         if not done:
             self.switch_player()
-        if not TRAINING:
+        if not self.is_training:
             print(f"After switching to player {self.current_player}:\n{self.grid}")
         return self.grid, reward, done
 
