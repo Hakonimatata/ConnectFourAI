@@ -42,7 +42,7 @@ class ConnectFour3DEnv: # Game environment class
         # Find the lowest available z in the column (x, y)
         for z in range(3, -1, -1):  # iterates from 3 to 0, bottom of the board to top
             if self.grid[z, x, y] == 0:  # if the cell is empty
-                self.grid[z, x, y] = 1  # the current player sees 1 as theirs
+                self.grid[z, x, y] = self.current_player  # Place the brick as the current player
                 self.last_placed_brick = (z, x, y)
                 
                 # Calculate reward for adjacent bricks
@@ -67,12 +67,18 @@ class ConnectFour3DEnv: # Game environment class
     
     def sample_action(self):
         """Returns a random valid action."""
+        valid_actions = self.get_available_actions()
+        return random.choice(valid_actions) if valid_actions else None
+
+
+    def get_available_actions(self):
+        """Returns a list of all valid actions."""
         valid_actions = []
         for x in range(4):
             for y in range(4):
                 if self.is_valid_action((x, y)):
                     valid_actions.append((x, y))  # Legg til alle gyldige handlinger
-        return random.choice(valid_actions) if valid_actions else None
+        return valid_actions
 
 
     def check_win(self):
@@ -102,7 +108,7 @@ class ConnectFour3DEnv: # Game environment class
 
         count = 0
         while 0 <= nx < 4 and 0 <= ny < 4 and 0 <= nz < 4:
-            if self.grid[nz, nx, ny] == 1:
+            if self.grid[nz, nx, ny] == self.current_player:
                 count += 1
                 # check next brick
                 nx += dx
@@ -113,45 +119,42 @@ class ConnectFour3DEnv: # Game environment class
         return count
 
 
-    def step(self, action):
-        """Performs a step in the environment. Players are switched."""
+    def step(self, action, player):
+        """Performs a step in the environment for a given player."""
+        if self.current_player != player:
+            raise ValueError(f"It's player {self.current_player}'s turn, not player {player}'s.")
 
         if not self.is_valid_action(action):
-            # invalid action. Penalize the AI and return
+            # Invalid action. Penalize the AI and return
             reward = -20
             done = True
             return self.grid, reward, done
-        
-        # Action is valid, apply
-        reward = self.apply_action(action)
 
-        # Check for win or draw
+        # Action is valid, apply the action for the given player
+        reward = self.apply_action(action)
+        
+        # Check for win or draw after the action is applied
         if self.check_win():
-            if not self.is_training:
-                print(f"Player {self.current_player} wins!")
-            reward += 10  # Win for current player
+            reward = 10
             done = True
-        elif np.all(self.grid != 0): # check if the grid is full without a win
+        elif np.all(self.grid != 0):  # check if the grid is full without a win
             reward = 0  # Draw
             done = True
         else:
             reward = 0
             done = False
 
-        if done and reward != 1:
-            # If the current player loses (reward is 0), give negative reward for the opponent (the player who did not win)
-            reward = -10
-
-        # Switch player if not done
         if not done:
             self.switch_player()
-        if not self.is_training:
-            print(f"After switching to player {self.current_player}:\n{self.grid}")
+
         return self.grid, reward, done
 
-    
+
     
     def switch_player(self):
-        """Switches player and inverts perspective."""
-        self.current_player = 3 - self.current_player  # Bytter mellom 1 og 2
-        self.grid *= -1  # Inverterer perspektivet
+        """Switches the current player."""
+        if self.current_player == 1:
+            self.current_player = 2
+        else:
+            self.current_player = 1
+

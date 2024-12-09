@@ -24,10 +24,11 @@ def model_move(state):
 def play_game():
     env = ConnectFour3DEnv()  # Opprett et nytt spillmiljø
     state = env.reset()  # Start et nytt spill
+    env.current_player = 2 # Spiller 2 er mennesket
     done = False
     while not done:
         # Spilleren gjør sitt trekk (menneskelig input)
-
+        print(env.grid)
         # Spillerens trekk (input som koordinater)
         valid_move = False
         while not valid_move:
@@ -37,7 +38,7 @@ def play_game():
                 # Validere trekket og oppdatere brettet
                 if env.is_valid_action((x, y)):
                     valid_move = True
-                    next_state, reward, done = env.step((x, y))
+                    next_state, reward, done = env.step((x, y), 2)
                 else:
                     print("Invalid move, try again.")
             except ValueError:
@@ -45,7 +46,7 @@ def play_game():
 
         # Sjekk om spillet er over etter spillerens trekk
         if done:
-            print("Player 1 wins!" if env.current_player == 1 else "Player 2 wins!")
+            print("AI wins!" if env.current_player == 1 else "You Win!")
             break
 
         # Modellens trekk
@@ -60,7 +61,7 @@ def play_game():
                 print(f"AI's move (as coordinates): ({x}, {y})")
 
                 # Utfør modellens trekk
-                state, reward, done = env.step((x, y))
+                state, reward, done = env.step((x, y), 1)
                 break
 
         

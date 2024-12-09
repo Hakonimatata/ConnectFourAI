@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import random
 from collections import deque, namedtuple
@@ -16,10 +17,9 @@ EPS_START = 1.0
 EPS_END = 0.1
 EPS_DECAY = 1000
 TARGET_UPDATE = 10
-NUM_EPISODES = 5 * 1000
+NUM_EPISODES = 20 * 1000
 LR = 1e-4
-
-steps_done = 0
+CHECKPOINT_INTERVAL = 500
 
 
 # --- DQN Model ---
@@ -27,15 +27,19 @@ class DQN(nn.Module):
     def __init__(self, input_dim, output_dim):
         super(DQN, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, 128),
+            nn.Linear(input_dim, 128),  # Første skjulte lag
             nn.ReLU(),
-            nn.Linear(128, 128),  # Hidden layer
+            nn.Linear(128, 128),  # Andre skjulte lag
             nn.ReLU(),
-            nn.Linear(128, output_dim)
+            nn.Linear(128, 128),  # Tredje skjulte lag (nytt lag)
+            nn.ReLU(),
+            nn.Linear(128, output_dim)  # Utgangslag
         )
 
     def forward(self, x):
         return self.fc(x)
+
+
 
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
 
@@ -71,8 +75,6 @@ optimizer = optim.Adam(policy_net.parameters(), lr=1e-4)
 criterion = nn.SmoothL1Loss()
 memory = ReplayMemory(10000)
 
-
-# optimize_model
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
@@ -155,49 +157,66 @@ def select_action(state, steps_done):
 if __name__ == '__main__':
 
     start_episode = 0
+    steps_done = 0
+    
+    # Check if checkpoint exists and load it
     if os.path.exists('checkpoint.pth'):
         start_episode, steps_done = load_checkpoint(policy_net, optimizer)
 
+    # Run until specified number of episodes
     for episode in range(start_episode, NUM_EPISODES):
-        state = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1)
+        state_p1 = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1)
+        state_p2 = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1)  # Player 2 starts with the same state
         
         for t in count():
-            action = select_action(state, steps_done)
+            # Select action for player 1
+            # available_actions = env.get_available_actions()
+            action_p1 = select_action(state_p1, steps_done)
+            
+            # Convert action to coordinates for player 1
+            x1, y1 = env.action_space[action_p1.item()]
 
-            # Convert action to (x, y) coordinates for the environment
-            x, y = env.action_space[action.item()]
+            next_state_p1, reward_p1, done = env.step((x1, y1), 1)  # Player 1 makes their move
+            next_state_p1 = None if done else torch.tensor(next_state_p1, dtype=torch.float32, device=device).view(1, -1)
+            reward_p1 = torch.tensor([reward_p1], device=device)
 
-            # Perform the action
-            next_state, reward, done = env.step((x, y))
+            # Store player 1's transition in memory
+            memory.push(state_p1, action_p1, next_state_p1, reward_p1)
 
-            reward = torch.tensor([reward], device=device)
+            if done:
+                break  # End the episode if done
 
-            # If the game is done, set next_state to None
-            next_state = None if done else torch.tensor(next_state, dtype=torch.float32, device=device).view(1, -1)
+            # Select action for player 2
+            action_p2 = env.sample_action()
+            next_state_p2, reward_p2, done = env.step(action_p2, 2)  # Player 2 makes their move
+            
+            if reward_p2 >= 10: # punish ai for loosing
+                memory.push(state_p1, action_p1, next_state_p1, -20)
+                
+            next_state_p2 = None if done else torch.tensor(next_state_p2, dtype=torch.float32, device=device).view(1, -1)
 
-            # Store the transition in memory
-            memory.push(state, action, next_state, reward)
+            # Update the state for each player
+            state_p1 = torch.tensor(next_state_p1, dtype=torch.float32, device=device).view(1, -1) if not done else None
+            state_p2 = torch.tensor(next_state_p2, dtype=torch.float32, device=device).view(1, -1) if not done else None
 
-            # Move to the next state
-            state = next_state
-
-            # Optimize the model
+            # Perform one step of the optimization (on the policy network)
             optimize_model()
 
             if done:
-                break
+                break  # End the episode if done
 
         # Update the target network every TARGET_UPDATE episodes
         if episode % TARGET_UPDATE == 0:
             target_net.load_state_dict(policy_net.state_dict())
 
-        # Save checkpoint every episode
-        save_checkpoint(episode, policy_net, optimizer, steps_done)
+        # Save checkpoint every CHECKPOINT_INTERVAL episodes
+        if episode % CHECKPOINT_INTERVAL == 0:
+            save_checkpoint(episode, policy_net, optimizer, steps_done)
 
         print(f"Episode {episode} completed")
 
     print("Training complete")
 
-    # Sacve model
+    # Save final model
     torch.save(policy_net.state_dict(), "dqn_model.pth")
-    print("Modellen er lagret som 'dqn_model.pth'")
+    print("Model saved as 'dqn_model.pth'")
