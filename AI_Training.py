@@ -17,7 +17,7 @@ EPS_START = 1.0
 EPS_END = 0.1
 EPS_DECAY = 2000
 TARGET_UPDATE = 10
-NUM_EPISODES = 100 * 1000
+NUM_EPISODES = 200 * 1000
 LR = 1e-4
 CHECKPOINT_INTERVAL = 500
 
@@ -218,8 +218,7 @@ if __name__ == '__main__':
             
             else: # Select action for player 2. Do not train on player 2's actions, only player 1 if loosing
                 
-                # random action for player 2
-                if random.random() < 0.2:
+                if random.random() < 0.1: # 10% of the time, player 2 makes a random move
                     action_p2 = env.sample_action()
                 else:
                     # invert grid for player 2 so the ai can make a move as their own perspective
