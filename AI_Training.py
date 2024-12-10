@@ -15,7 +15,7 @@ BATCH_SIZE = 256
 GAMMA = 0.99
 EPS_START = 1.0
 EPS_END = 0.1
-EPS_DECAY = 1000
+EPS_DECAY = 2000
 TARGET_UPDATE = 10
 NUM_EPISODES = 20 * 1000
 LR = 1e-4
@@ -75,39 +75,54 @@ optimizer = optim.Adam(policy_net.parameters(), lr=1e-4)
 criterion = nn.SmoothL1Loss()
 memory = ReplayMemory(10000)
 
+
+# --- Optimize Model ---
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
-    transitions = memory.sample(BATCH_SIZE)
-    batch = Transition(*zip(*transitions))
+    
+    # Sample a batch from memory
+    batch = memory.sample(BATCH_SIZE)
+    
+    # Unpack the batch
+    states, actions, next_states, rewards = zip(*batch)
 
-    state_batch = torch.stack(batch.state)  # Stack the states into a single batch tensor
-    action_batch = torch.tensor(batch.action, device=device).view(-1, 1)  # Ensure action_batch has shape (batch_size, 1)
-    reward_batch = torch.tensor(batch.reward, device=device)
-    non_final_mask = torch.tensor([s is not None for s in batch.next_state], device=device, dtype=torch.bool)
-    non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
+    # Convert to torch tensors and move them to the same device as the model
+    states = torch.tensor(np.array(states), dtype=torch.float32).to(device)
+    actions = torch.tensor(np.array(actions), dtype=torch.int64).to(device)  # Correct dtype for actions
+    next_states = torch.tensor(np.array(next_states), dtype=torch.float32).to(device)
+    rewards = torch.tensor(np.array(rewards), dtype=torch.float32).to(device)
 
-    # Check the shape of the output of policy_net(state_batch)
-    q_values = policy_net(state_batch)  # This should have shape (batch_size, num_actions)
+    # Flatten states and next_states to match the expected input size
+    states = states.view(states.size(0), -1)  # Flatten (batch_size, 4, 4, 4) to (batch_size, 64)
+    next_states = next_states.view(next_states.size(0), -1)  # Same for next_states
 
-    # Squeeze q_values to remove the singleton dimension
-    q_values = q_values.squeeze(1)  # Now shape should be (batch_size, num_actions)
+    # Calculate Q values for the current state
+    q_values = policy_net(states)  # Shape: (batch_size, 16)
 
-    # Gather the state-action values from the policy network
-    state_action_values = q_values.gather(1, action_batch)  # action_batch should be of shape (batch_size, 1)
+    # Get the indices of the selected actions using argmax (since actions are one-hot encoded)
+    action_indices = actions.argmax(1)  # Get the indices of the actions (shape: (batch_size,))
+    
+    # Gather Q values based on the selected actions
+    selected_q_values = q_values.gather(1, action_indices.unsqueeze(1))  # Shape: (batch_size, 1)
 
-    # Squeeze to remove the extra dimension (it will become of shape (batch_size,))
-    state_action_values = state_action_values.squeeze(1)  # Remove the unnecessary second dimension
+    # Calculate target Q values
+    next_q_values = policy_net(next_states)  # Shape: (batch_size, 16)
+    next_q_values = next_q_values.max(1)[0]  # Max Q value for the next state
+    target_q_values = rewards + (GAMMA * next_q_values)  # Bellman equation
 
-    next_state_values = torch.zeros(BATCH_SIZE, device=device)
-    next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
-    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
+    # Loss function (e.g., MSE)
+    loss = nn.MSELoss()(selected_q_values.squeeze(), target_q_values)
 
-    # Calculate the loss
-    loss = criterion(state_action_values, expected_state_action_values)
+    # Backpropagation
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
+
+    return loss.item()
+
+
+
 
 
 # --- Checkpointing Functions ---
@@ -127,7 +142,7 @@ def load_checkpoint(model, optimizer, filename='checkpoint.pth'):
     steps_done = checkpoint['steps_done']
     return epoch, steps_done
 
-# --- Main training loop. Run thus for training ---
+# --- Main training loop. Run this for training ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 env = ConnectFour3DEnv()
 env.is_training = True
@@ -144,14 +159,26 @@ memory = ReplayMemory(10000)
 
 
 # Select action with epsilon-greedy strategy
-def select_action(state, steps_done):
+def select_action(state, available_actions, steps_done):
+    state = torch.tensor(state, dtype=torch.float32, device=device).view(1, -1) # convert state to tensor
     eps_threshold = EPS_END + (EPS_START - EPS_END) * np.exp(-1. * steps_done / EPS_DECAY)
     steps_done += 1
     if random.random() > eps_threshold:
         with torch.no_grad():
-            return policy_net(state).argmax(dim=1).view(1, 1)
+            # select action with policy_net. Chose the action with the highest Q-value that is a valid move
+            q_values = policy_net(state)[0, :] # Get the Q-values for the current state
+            # env.action_space holds all 16 combinations of actions as [(x, y) for x in range(4) for y in range(4)]
+            available_action_indices = [env.action_space.index(action) for action in available_actions] # filter out all invalid actions
+            valid_q_values = q_values[available_action_indices]
+            
+            # Chose highst Q-value of the valid actions
+            best_action_idx = valid_q_values.argmax().item()
+            best_action = available_actions[best_action_idx]
+
+            return best_action
     else:
-        return torch.tensor([[random.randrange(env.num_actions)]], device=device, dtype=torch.long)
+        # random action for exploration
+        return env.sample_action()
 
 # Start training
 if __name__ == '__main__':
@@ -165,45 +192,59 @@ if __name__ == '__main__':
 
     # Run until specified number of episodes
     for episode in range(start_episode, NUM_EPISODES):
-        state_p1 = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1)
-        state_p2 = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1)  # Player 2 starts with the same state
+        # Start with a empty board
+        # state = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1) # Reshape to (1, num_observations = 64) as tensor
+        state = env.reset()
+        new_state = state
+        
+        # random who goes first
+        env.current_player = random.choice([-1, 1])
         
         for t in count():
-            # Select action for player 1
-            # available_actions = env.get_available_actions()
-            action_p1 = select_action(state_p1, steps_done)
-            
-            # Convert action to coordinates for player 1
-            x1, y1 = env.action_space[action_p1.item()]
 
-            next_state_p1, reward_p1, done = env.step((x1, y1), 1)  # Player 1 makes their move
-            next_state_p1 = None if done else torch.tensor(next_state_p1, dtype=torch.float32, device=device).view(1, -1)
-            reward_p1 = torch.tensor([reward_p1], device=device)
-
-            # Store player 1's transition in memory
-            memory.push(state_p1, action_p1, next_state_p1, reward_p1)
-
-            if done:
-                break  # End the episode if done
-
-            # Select action for player 2
-            action_p2 = env.sample_action()
-            next_state_p2, reward_p2, done = env.step(action_p2, 2)  # Player 2 makes their move
-            
-            if reward_p2 >= 10: # punish ai for loosing
-                memory.push(state_p1, action_p1, next_state_p1, -20)
+            if env.current_player == 1: # Select action for player 1
                 
-            next_state_p2 = None if done else torch.tensor(next_state_p2, dtype=torch.float32, device=device).view(1, -1)
+                available_actions = env.get_valid_actions() # list of valid actions as an (x y) tuple
+                action_p1 = select_action(state, available_actions, steps_done)
+                x1, y1 = action_p1
 
-            # Update the state for each player
-            state_p1 = torch.tensor(next_state_p1, dtype=torch.float32, device=device).view(1, -1) if not done else None
-            state_p2 = torch.tensor(next_state_p2, dtype=torch.float32, device=device).view(1, -1) if not done else None
+                new_state, reward_p1, done = env.step((x1, y1), 1)  # Player 1 makes their move
 
-            # Perform one step of the optimization (on the policy network)
-            optimize_model()
+                # Store player 1's transition in memory
+                action_p1_one_hot = env.action_to_one_hot(action_p1)
+                memory.push(state, action_p1_one_hot, new_state, reward_p1)
 
-            if done:
-                break  # End the episode if done
+                if done:
+                    break  # End the episode if done
+            
+            else: # Select action for player 2. Do not train on player 2's actions, only player 1 if loosing
+                
+                # random action for player 2
+                if random.random() < 0.2:
+                    action_p2 = env.sample_action()
+                else:
+                    # invert grid for player 2 so the ai can make a move as their own perspective
+                    new_state *= -1
+                    available_actions = env.get_valid_actions() # list of valid actions as an (x y) tuple
+                    action_p2 = select_action(new_state, available_actions, steps_done)
+                    new_state *= -1 # invert back again
+
+                x2, y2 = action_p2
+                new_state, reward_p2, done = env.step((x2, y2), -1)  # Player 2 makes their move as -1
+
+                if done and reward_p2 >= 10: # punish ai action when loosing
+                    print("-50 AI lost")
+                    loss_punishment = -50
+                    memory.push(state, action_p1_one_hot, new_state, loss_punishment)
+                    
+                # Update the state for each player
+                state = new_state if not done else None
+
+                # Perform one step of the optimization (on the policy network)
+                optimize_model()
+
+                if done:
+                    break  # End the episode if done
 
         # Update the target network every TARGET_UPDATE episodes
         if episode % TARGET_UPDATE == 0:
@@ -213,7 +254,9 @@ if __name__ == '__main__':
         if episode % CHECKPOINT_INTERVAL == 0:
             save_checkpoint(episode, policy_net, optimizer, steps_done)
 
-        print(f"Episode {episode} completed")
+        # Print progress every 10 episodes
+        if episode % 10 == 0:
+            print(f"Episode {episode} completed")
 
     print("Training complete")
 
