@@ -146,31 +146,31 @@ class ConnectFour3DEnv: # Game environment class
             total_count = count_positive + count_negative + 1
             
             # Reward scaling: encourage longer lines
+            if total_count == 2:
+                reward += 0.1
             if total_count == 3:
-                #TODO: test this reward bonus
-                # reward += 1  # Larger reward for 3 in a row
-                pass
+                reward += 1  # Larger reward for 3 in a row
         
-        if reward > 0 and self.current_player == 1: # Only print if AI INFO
-            print(f"+{reward} reward for 3 adjacent bricks in any direction")
+        # if reward > 0 and self.current_player == 1: # Only print if AI INFO
+        #     print(f"+{reward} reward for 3 adjacent bricks in any direction")
 
         # reward for blocking the opponents 4 in a row
         for dx, dy, dz in self.directions:
             count_positive = self._count_in_direction_last_placed_brick(dx, dy, dz, count_opponent = True)
             count_negative = self._count_in_direction_last_placed_brick(-dx, -dy, -dz, count_opponent = True)
             total_count = count_positive + count_negative
-           
+
             if total_count == 3:
                 reward = 10  # Reward for blocking
 
-                if self.current_player == 1: # Only print if AI INFO
-                    print("+10 Blocking a opponent's potential 4 in a row")
+            # if self.current_player == 1: # Only print if AI INFO
+            #     print("+10 Blocking a opponent's potential 4 in a row")
 
 
         # Check for win or draw after the action is applied
         if self.check_win():
-            if self.current_player == 1: # Only print if AI INFO
-                print("+10 reward for WIN")
+            # if self.current_player == 1: # Only print if AI INFO
+            #     print("+10 reward for WIN")
             reward = 10.0
             done = True
         elif np.all(self.grid != 0):  # End if draw

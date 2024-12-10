@@ -17,10 +17,9 @@ EPS_START = 1.0
 EPS_END = 0.1
 EPS_DECAY = 2000
 TARGET_UPDATE = 10
-NUM_EPISODES = 20 * 1000
+NUM_EPISODES = 100 * 1000
 LR = 1e-4
 CHECKPOINT_INTERVAL = 500
-
 
 # --- DQN Model ---
 class DQN(nn.Module):
@@ -233,7 +232,7 @@ if __name__ == '__main__':
                 new_state, reward_p2, done = env.step((x2, y2), -1)  # Player 2 makes their move as -1
 
                 if done and reward_p2 >= 10: # punish ai action when loosing
-                    print("-50 AI lost")
+                    # print("-50 AI lost")
                     loss_punishment = -50
                     memory.push(state, action_p1_one_hot, new_state, loss_punishment)
                     
