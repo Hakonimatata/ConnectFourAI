@@ -22,47 +22,42 @@ class ConnectFour3DEnv: # Game environment class
             (1, 1, 1), (1, -1, -1), (-1, 1, -1),
             (-1, -1, 1),
         ]
+        self.is_training = False
         
     def reset(self):
         """Resets the game state."""
         self.grid = np.zeros((4, 4, 4), dtype=int)
         self.current_player = 1
         return self.grid
-
-    # def is_valid_action(self, action):
-    #     """Checks if an action (x, y) is valid."""
-    #     # Get action, x, y grid of possible moves
-    #     x, y = action
-    #     return 0 <= x < 4 and 0 <= y < 4 and self.grid[0, x, y] == 0 # z = 0 is the heighest layer, z = 3 is the lowest
     
     def is_valid_action(self, action):
         """Checks if an action (x, y) is valid."""
         x, y = action
 
-        # Sjekk om handlingen er innenfor brettet
+        # Is the action within the grid?
         if not (0 <= x < 4 and 0 <= y < 4):
             return False
 
-        # Sjekk om det finnes en ledig plass i kolonnen (x, y)
-        for z in range(3, -1, -1):  # Fra bunnen (z=3) til toppen (z=0)
-            if self.grid[z, x, y] == 0:
-                return True  # Finn første ledige plass
+        # Is there a free spot for the piece?
+        for z in range(3, -1, -1):  # z=3 is the bottom while z=0 is the top
+            if self.grid[z, x, y] == 0: # Return true if there is a free spot
+                return True  
 
         return False  # Ingen ledige plasser i kolonnen
 
 
     def apply_action(self, action):
-        """Applies the action (x, y) for the current player. This also calculates the reward (not ideal to have it baked in here)."""
+        """Applies the action (x, y) for the current player."""
         x, y = action
-        reward = 0
         # Place the piece on the lowest available z in the column (x, y). Cannot place pieces in thin air
         for z in range(3, -1, -1):  # iterates from 3 to 0, from the bottom of the board to the top
             if self.grid[z, x, y] == 0:  # first available / empty cell
-                # Place the piece by setting it to 1. The current player sees 1 as theirs, and -1 as the opponent's
-                self.grid[z, x, y] = 1 
+                # Place the piece by setting it to current player
+                self.grid[z, x, y] = self.current_player
 
                 # Update last placed piece (used to check four in a row)
                 self.last_placed_piece = (z, x, y)
+                break # Exit loop after placing the piece
                 
 
     def calculate_reward(self):
@@ -78,11 +73,20 @@ class ConnectFour3DEnv: # Game environment class
             
             # Reward scaling: encourage longer lines
             if total_count == 2:
-                reward += 0.5  # Small reward for 2 in a row
+                reward += 0.1  # Small reward for 2 in a row
             elif total_count == 3:
                 reward += 1  # Larger reward for 3 in a row
             elif total_count >= 4:
                 reward += 10.0  # Winning move. Game is over
+
+
+            # Calculate reward for blocking the opponent's 4 in a row
+            count_positive = self._count_in_direction_last_placed_piece(dx, dy, dz, count_opponent = True)
+            count_negative = self._count_in_direction_last_placed_piece(-dx, -dy, -dz, count_opponent = True)
+            total_count = count_positive + count_negative
+
+            if total_count == 3:
+                reward += 10  # Reward for blocking
 
         return reward
     
@@ -98,8 +102,8 @@ class ConnectFour3DEnv: # Game environment class
         for x in range(4):
             for y in range(4):
                 if self.is_valid_action((x, y)):
-                    valid_actions.append((x, y))  # Legg til alle gyldige handlinger
-        return random.choice(valid_actions) if valid_actions else None
+                    valid_actions.append((x, y))
+        return valid_actions
 
 
     def check_win(self):
@@ -119,19 +123,19 @@ class ConnectFour3DEnv: # Game environment class
 
         return False
 
-    def _count_in_direction_last_placed_brick(self, dx, dy, dz, count_opponent=False):
-        """Counts all bricks in one direction."""
-        z, x, y = self.last_placed_brick
+    def _count_in_direction_last_placed_piece(self, dx, dy, dz, count_opponent=False):
+        """Counts all pieces in one direction. It can also be used to count the opponent's pieces from the direction of the last placed piece."""
+        z, x, y = self.last_placed_piece
 
         nx = x + dx
         ny = y + dy
         nz = z + dz
 
-        brick_to_count = -self.current_player if count_opponent else self.current_player
+        piece_to_count = -self.current_player if count_opponent else self.current_player
 
         count = 0
         while 0 <= nx < 4 and 0 <= ny < 4 and 0 <= nz < 4:
-            if self.grid[nz, nx, ny] == brick_to_count:
+            if self.grid[nz, nx, ny] == piece_to_count:
                 count += 1
                 # check next piece
                 nx += dx
@@ -147,77 +151,43 @@ class ConnectFour3DEnv: # Game environment class
         if self.current_player != player:
             raise ValueError(f"It's player {self.current_player}'s turn, not player {player}'s.")
 
-        if not self.is_valid_action(action): #TODO: Remove? Validation should be already done
+        if not self.is_valid_action(action): # This should never happen
             # invalid action. 
             Exception(f"Invalid action: {action}")
-
-            reward = -1
-            done = True
-            return self.grid, reward, done
 
         # Apply the action for the given player
         self.apply_action(action)
         
-
-        # Calculate reward associated with the action -----------------------------------------
-
-        reward = 0
-        # Calculate reward for adjacent bricks
-        for dx, dy, dz in self.directions:
-            count_positive = self._count_in_direction_last_placed_brick(dx, dy, dz)
-            count_negative = self._count_in_direction_last_placed_brick(-dx, -dy, -dz)
-            total_count = count_positive + count_negative + 1
-            
-            # Reward scaling: encourage longer lines
-            if total_count == 2:
-                reward += 0.1
-            if total_count == 3:
-                reward += 1  # Larger reward for 3 in a row
-        
-        # if reward > 0 and self.current_player == 1: # Only print if AI INFO
-        #     print(f"+{reward} reward for 3 adjacent bricks in any direction")
-
-        # reward for blocking the opponents 4 in a row
-        for dx, dy, dz in self.directions:
-            count_positive = self._count_in_direction_last_placed_brick(dx, dy, dz, count_opponent = True)
-            count_negative = self._count_in_direction_last_placed_brick(-dx, -dy, -dz, count_opponent = True)
-            total_count = count_positive + count_negative
-
-            if total_count == 3:
-                reward = 10  # Reward for blocking
-
-            # if self.current_player == 1: # Only print if AI INFO
-            #     print("+10 Blocking a opponent's potential 4 in a row")
-
+        # Calculate reward
+        reward = self.calculate_reward()
 
         # Check for win or draw after the action is applied
         if self.check_win():
-            # if self.current_player == 1: # Only print if AI INFO
-            #     print("+10 reward for WIN")
-            reward = 10.0
             done = True
         elif np.all(self.grid != 0):  # End if draw
+            reward = 0
             done = True
         else:
             done = False
-
-        if not done:
+            # Switch player
             self.switch_player()
 
         return self.grid, reward, done
 
     
     def switch_player(self):
-        """Switches the current player."""
+        """Switches the current player. 1 represents current player, -1 represents opponent."""
         self.current_player *= -1
 
     def action_to_one_hot(self, action):
+        """Converts an action (x, y) to a one-hot vector."""
         action_index = self.action_space.index(action)  # Finds index of chosen action
         one_hot_action = np.zeros(self.num_actions)
         one_hot_action[action_index] = 1
         return one_hot_action
     
     def one_hot_to_action(self, one_hot_action):
+        """Converts a one-hot vector to an action (x, y)."""
         action_index = np.argmax(one_hot_action)
         return self.action_space[action_index]
 

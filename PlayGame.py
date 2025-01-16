@@ -11,8 +11,8 @@ policy_net = DQN(env.num_observations, env.num_actions).to(device)
 policy_net.load_state_dict(torch.load("dqn_model.pth"))
 policy_net.eval()
 
-# Funksjon for å gjøre trekk med modellen
 def model_move(state, valid_actions):
+    """Predicts best move using the model. The move is a valid action."""
     state = torch.tensor(state, dtype=torch.float32, device=device).view(1, -1) # convert state to tensor
     q_values = policy_net(state)[0, :] # Get the Q-values for the current state
     # env.action_space holds all 16 combinations of actions as [(x, y) for x in range(4) for y in range(4)]
@@ -25,23 +25,24 @@ def model_move(state, valid_actions):
     return best_action
 
 def play_game():
-    env = ConnectFour3DEnv()  # Opprett et nytt spillmiljø
-    state = env.reset()  # Start et nytt spill
-    env.current_player = -1 # Start med spiller 2, mennesket
+    """Plays the game against the model."""
+    env = ConnectFour3DEnv()  # Init game environment
+    state = env.reset()  # Start empty board
+    env.current_player = -1 # Start with player -1 (the human)
     done = False
     while not done:
-        # Spilleren gjør sitt trekk (menneskelig input)
+        # Print board
         print(env.grid)
-        # Spillerens trekk (input som koordinater)
+
+        # Get human input
         valid_move = False
         while not valid_move:
             try:
-                # Get player input
                 x, y = map(int, input("Enter your move (x y): ").split())
                 # Validate move
                 if env.is_valid_action((x, y)):
                     valid_move = True
-                    state, reward, done = env.step((x, y), -1)
+                    state, _, done = env.step((x, y), -1) # human make their move as -1
                 else:
                     print("Invalid move, try again.")
             except ValueError:
@@ -52,24 +53,15 @@ def play_game():
             print("AI wins!" if env.current_player == 1 else "You Win!")
             break
 
-        # Modellens trekk
-        valid_actions = env.get_valid_actions() # list of valid actions as an (x y) tuple
-        action = model_move(state, valid_actions)  # Modellens trekk (som en indeks)
-        x, y = action  # Konverter action til koordinater (x, y)
+        # Model does a move
+        valid_actions = env.get_valid_actions()
+        action = model_move(state, valid_actions)
+        x, y = action
         print(f"AI's move: ({x}, {y})")
-
-        # Utfør modellens trekk
-        state, reward, done = env.step((x, y), 1)
-
-        
-
-        if done and reward < 0:
-            print("AI did an invalid move!")
-            break
+        state, _, done = env.step((x, y), 1)
 
         if done:
             print("Player 1 wins!" if env.current_player == 1 else "Player 2 wins!")
             break
-
         
 play_game()

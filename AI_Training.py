@@ -17,22 +17,23 @@ EPS_START = 1.0
 EPS_END = 0.1
 EPS_DECAY = 2000
 TARGET_UPDATE = 10
-NUM_EPISODES = 200 * 1000
-LR = 1e-4
+NUM_EPISODES = 200 * 1000   # Total number of episodes (run up until this number)
+LR = 1e-4                   # Learning rate
 CHECKPOINT_INTERVAL = 500
 
 # --- DQN Model ---
 class DQN(nn.Module):
+    """DQN network with two hidden layers."""
     def __init__(self, input_dim, output_dim):
         super(DQN, self).__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, 128),  # Første skjulte lag
+            nn.Linear(input_dim, 128), 
             nn.ReLU(),
-            nn.Linear(128, 128),  # Andre skjulte lag
+            nn.Linear(128, 128),  
             nn.ReLU(),
-            nn.Linear(128, 128),  # Tredje skjulte lag (nytt lag)
+            nn.Linear(128, 128), 
             nn.ReLU(),
-            nn.Linear(128, output_dim)  # Utgangslag
+            nn.Linear(128, output_dim) 
         )
 
     def forward(self, x):
@@ -40,7 +41,7 @@ class DQN(nn.Module):
 
 
 
-Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
+Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward')) #TODO: do i even use this?
 
 # --- Replay Memory ---
 class ReplayMemory:
@@ -141,7 +142,7 @@ def load_checkpoint(model, optimizer, filename='checkpoint.pth'):
     steps_done = checkpoint['steps_done']
     return epoch, steps_done
 
-# --- Main training loop. Run this for training ---
+# --- Main training loop  ---
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 env = ConnectFour3DEnv()
 env.is_training = True
@@ -154,7 +155,6 @@ target_net.eval()
 optimizer = optim.Adam(policy_net.parameters(), lr=LR)
 criterion = nn.SmoothL1Loss()
 memory = ReplayMemory(10000)
-
 
 
 # Select action with epsilon-greedy strategy
@@ -190,16 +190,15 @@ if __name__ == '__main__':
         start_episode, steps_done = load_checkpoint(policy_net, optimizer)
 
     # Run until specified number of episodes
-    for episode in range(start_episode, NUM_EPISODES):
+    for episode in range(start_episode, NUM_EPISODES + 1):
         # Start with a empty board
-        # state = torch.tensor(env.reset(), dtype=torch.float32, device=device).view(1, -1) # Reshape to (1, num_observations = 64) as tensor
         state = env.reset()
         new_state = state
         
-        # random who goes first
+        # Make it random who goes first
         env.current_player = random.choice([-1, 1])
         
-        for t in count():
+        for t in count(): # Loop for single game
 
             if env.current_player == 1: # Select action for player 1
                 
@@ -221,7 +220,7 @@ if __name__ == '__main__':
                 if random.random() < 0.1: # 10% of the time, player 2 makes a random move
                     action_p2 = env.sample_action()
                 else:
-                    # invert grid for player 2 so the ai can make a move as their own perspective
+                    # invert grid for player 2 so the ai can make a move as their "own" perspective
                     new_state *= -1
                     available_actions = env.get_valid_actions() # list of valid actions as an (x y) tuple
                     action_p2 = select_action(new_state, available_actions, steps_done)
@@ -230,8 +229,7 @@ if __name__ == '__main__':
                 x2, y2 = action_p2
                 new_state, reward_p2, done = env.step((x2, y2), -1)  # Player 2 makes their move as -1
 
-                if done and reward_p2 >= 10: # punish ai action when loosing
-                    # print("-50 AI lost")
+                if done and reward_p2 > 0: # Condition for p1 to loose
                     loss_punishment = -50
                     memory.push(state, action_p1_one_hot, new_state, loss_punishment)
                     
