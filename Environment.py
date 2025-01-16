@@ -10,13 +10,12 @@ class ConnectFour3DEnv: # Game environment class
     def __init__(self):
         # init empty grid
         self.grid = np.zeros((4, 4, 4), dtype=int)
-        self.current_player = 1  # 1 for Player 1, 2 for Player 2
-        self.last_placed_brick = None
+        self.current_player = 1  # 1 represents Player 1, -1 represents Player 2
+        self.last_placed_piece = None
         self.num_actions = 4 * 4
         self.num_observations = 4 * 4 * 4
-        # Create the action space of all possible combinations of actions
-        self.action_space = [(x, y) for x in range(4) for y in range(4)]
-        self.directions = [ # 13 directions in total
+        self.action_space = [(x, y) for x in range(4) for y in range(4)] # Action space of all possible combinations of actions
+        self.directions = [ # 13 directions in total where four in a row is possible
             (1, 0, 0),  
             (0, 1, 0),  
             (0, 0, 1),  
@@ -44,37 +43,42 @@ class ConnectFour3DEnv: # Game environment class
         """Checks if an action (x, y) is valid."""
         # Get action, x, y grid of possible moves
         x, y = action
-        return 0 <= x < 4 and 0 <= y < 4 and self.grid[0, x, y] == 0 # z = 0 is the heighest layer, z = 3 is the lowest
+        return 0 <= x < 4 and 0 <= y < 4 and self.grid[0, x, y] == 0 # z = 0 is the heighest layer, z = 3 is the lowest. If 0, the cell is empty and return true
 
     def apply_action(self, action):
-        """Applies the action (x, y) for the current player."""
+        """Applies the action (x, y) for the current player. This also calculates the reward (not ideal to have it baked in here)."""
         x, y = action
-        reward = 0  # Initialize reward
-        # Find the lowest available z in the column (x, y)
-        for z in range(3, -1, -1):  # iterates from 3 to 0, bottom of the board to top
-            if self.grid[z, x, y] == 0:  # if the cell is empty
-                self.grid[z, x, y] = 1  # the current player sees 1 as theirs
-                self.last_placed_brick = (z, x, y)
+        reward = 0
+        # Place the piece on the lowest available z in the column (x, y). Cannot place pieces in thin air
+        for z in range(3, -1, -1):  # iterates from 3 to 0, from the bottom of the board to the top
+            if self.grid[z, x, y] == 0:  # first available / empty cell
+                # Place the piece by setting it to 1. The current player sees 1 as theirs, and -1 as the opponent's
+                self.grid[z, x, y] = 1 
+
+                # Update last placed piece (used to check four in a row)
+                self.last_placed_piece = (z, x, y)
                 
-                # Calculate reward for adjacent bricks
-                for dx, dy, dz in self.directions:
-                    count_positive = self._count_in_direction_last_placed_brick(dx, dy, dz)
-                    count_negative = self._count_in_direction_last_placed_brick(-dx, -dy, -dz)
-                    
-                    # Total aligned bricks in this direction (include the placed brick)
-                    total_count = count_positive + count_negative + 1
-                    
-                    # Reward scaling: encourage longer lines
-                    if total_count == 2:
-                        reward += 0.5  # Small reward for 2 in a row
-                    elif total_count == 3:
-                        reward += 1  # Larger reward for 3 in a row
-                    elif total_count >= 4:
-                        reward += 10.0  # Winning move
 
-                break  # Exit loop after placing the brick
+    def calculate_reward(self):
+        """Calculates the reward for the current player."""
+        # Calculate reward for adjacent pieces
+        reward = 0
+        for dx, dy, dz in self.directions:
+            count_positive = self._count_in_direction_last_placed_piece(dx, dy, dz)
+            count_negative = self._count_in_direction_last_placed_piece(-dx, -dy, -dz)
+            
+            # Total aligned pieces in this direction (include the placed piece)
+            total_count = count_positive + count_negative + 1
+            
+            # Reward scaling: encourage longer lines
+            if total_count == 2:
+                reward += 0.5  # Small reward for 2 in a row
+            elif total_count == 3:
+                reward += 1  # Larger reward for 3 in a row
+            elif total_count >= 4:
+                reward += 10.0  # Winning move. Game is over
+
         return reward
-
     
     def sample_action(self):
         """Returns a random valid action."""
@@ -85,17 +89,16 @@ class ConnectFour3DEnv: # Game environment class
                     valid_actions.append((x, y))  # Legg til alle gyldige handlinger
         return random.choice(valid_actions) if valid_actions else None
 
-
     def check_win(self):
         """Helper to check for four in a row along any axis or diagonal."""
         for dx, dy, dz in self.directions:
-            count = 1  # include the last placed brick
+            count = 1  # include the last placed piece
 
             # Check in positive direction
-            count += self._count_in_direction_last_placed_brick(dx, dy, dz)
+            count += self._count_in_direction_last_placed_piece(dx, dy, dz)
 
             # Check in negative direction
-            count += self._count_in_direction_last_placed_brick(-dx, -dy, -dz)
+            count += self._count_in_direction_last_placed_piece(-dx, -dy, -dz)
 
             # Return true if four in a row
             if count >= 4:
@@ -103,9 +106,9 @@ class ConnectFour3DEnv: # Game environment class
 
         return False
 
-    def _count_in_direction_last_placed_brick(self, dx, dy, dz):
-        """Counts all bricks in one direction."""
-        z, x, y = self.last_placed_brick
+    def _count_in_direction_last_placed_piece(self, dx, dy, dz):
+        """Counts all pieces in one direction."""
+        z, x, y = self.last_placed_piece
 
         nx = x + dx
         ny = y + dy
@@ -115,7 +118,7 @@ class ConnectFour3DEnv: # Game environment class
         while 0 <= nx < 4 and 0 <= ny < 4 and 0 <= nz < 4:
             if self.grid[nz, nx, ny] == 1:
                 count += 1
-                # check next brick
+                # check next piece
                 nx += dx
                 ny += dy
                 nz += dz
@@ -130,25 +133,27 @@ class ConnectFour3DEnv: # Game environment class
         # print(f"Before action by player {self.current_player}:\n{self.grid}")
         # print(f"Action: {action}")
 
-        if not self.is_valid_action(action):
-            # invalid action. Penalize the AI and return
+        if not self.is_valid_action(action): #TODO: Remove? Validation should be already done
+            # invalid action. 
+            Exception(f"Invalid action: {action}")
+
             reward = -1
             done = True
             return self.grid, reward, done
         
-        # Action is valid, apply
-        reward = self.apply_action(action)
+        # Apply action
+        self.apply_action(action)
+
+        # Calculate reward
+        reward = self.calculate_reward()
 
         # Check for win or draw
         if self.check_win():
             print(f"Player {self.current_player} wins!")
-            reward += 10  # Win for current player
             done = True
         elif np.all(self.grid != 0): # check if the grid is full without a win
-            reward = 0  # Draw
             done = True
         else:
-            reward = 0
             done = False
 
         if done and reward != 1:
